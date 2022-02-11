@@ -1,9 +1,8 @@
 import { ElementHandle, Page, BoundingBox } from 'puppeteer'
 import { Vector, bezierCurve, direction, magnitude, origin, overshoot } from './math'
-export { default as installMouseHelper } from './mouse-helper'
 
 interface BoxOptions { readonly paddingPercentage: number }
-interface MoveOptions extends BoxOptions { readonly waitForSelector: number, readonly moveDelay?: number }
+interface MoveOptions extends BoxOptions { readonly waitForSelector: number, readonly moveDelay?: number, readonly iframe: Page }
 interface ClickOptions extends MoveOptions { readonly waitForClick: number }
 export interface GhostCursor {
   toggleRandomMove: (random: boolean) => void
@@ -193,6 +192,79 @@ export const createCursor = (page: Page, start: Vector = origin, performRandomMo
     },
     async move (selector: string | ElementHandle, options?: MoveOptions): Promise<void> {
       actions.toggleRandomMove(false)
+      if (options?.iframe !== undefined) {
+        var temp_page = options.iframe
+
+
+
+
+
+
+
+        let elem: ElementHandle | null = null
+        if (typeof selector === 'string') {
+          if (selector.startsWith('//') || selector.startsWith('(//')) {
+            if (options?.waitForSelector !== undefined) {
+              await temp_page.waitForXPath(selector, {
+                timeout: options.waitForSelector
+              })
+            }
+            [elem] = await temp_page.$x(selector)
+          } else {
+            if (options?.waitForSelector !== undefined) {
+              await temp_page.waitForSelector(selector, {
+                timeout: options.waitForSelector
+              })
+            }
+            elem = await temp_page.$(selector)
+          }
+          if (elem === null) {
+            throw new Error(
+              `Could not find element with selector "${selector}", make sure you're waiting for the elements with "puppeteer.waitForSelector"`
+            )
+          }
+        } else { // ElementHandle
+          elem = selector
+        }
+  
+        // Make sure the object is in view
+        if (elem._remoteObject?.objectId !== undefined) {
+          try {
+            await (temp_page as any)._client.send('DOM.scrollIntoViewIfNeeded', {
+              objectId: elem._remoteObject.objectId
+            })
+          } catch (e) { // use regular JS scroll method as a fallback
+            console.debug('Falling back to JS scroll method', e)
+            await elem.evaluate(e => e.scrollIntoView({ behavior: 'smooth' }))
+          }
+        }
+        let box: BoundingBox | null = await getElementBox(temp_page, elem)
+        if (box === null) {
+          box = await elem.evaluate((el: Element) => el.getBoundingClientRect()) as BoundingBox
+        }
+        const { height, width } = box
+        const destination = getRandomBoxPoint(box, options)
+        const dimensions = { height, width }
+        const overshooting = shouldOvershoot(previous, destination)
+        const to = overshooting ? overshoot(destination, overshootRadius) : destination
+        await tracePath(path(previous, to))
+  
+        if (overshooting) {
+          const correction = path(to, { ...dimensions, ...destination }, overshootSpread)
+  
+          await tracePath(correction)
+        }
+        previous = destination
+  
+        actions.toggleRandomMove(true)
+
+
+
+
+
+
+      }
+      
       let elem: ElementHandle | null = null
       if (typeof selector === 'string') {
         if (selector.startsWith('//') || selector.startsWith('(//')) {
